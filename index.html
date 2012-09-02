@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>FFT nach Cooley-Tukey</title>
+        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        <script src="jquery-1.7.2.min.js"></script>
+    </head>
+    <body>
+        <h1>Ok worum gehts</h1>
+        <p>Transformation eines Eingangssignals x(t) mittels FFT in seine Frequenzdomäne. 
+        Der FFT ist dabei ein technisches Hilfsmittel um die Werte des DFT zu berechnen. Die bekannteste Implementation 
+        findet man von Cooley und Tukey. Dabei wird Divide & Conquer angewandt, um aus einem DFT über 2n zwei DFT's über n berechnen.
+        Mittels der Komplexität für DFT lässt sich erkennen das der Rechenaufwand um 1/4 verringert, was bei trigonometrischen Operationen
+        viel wert ist.</p>
+        <h2>Nyquist-Shannon-Abtasttheorem o. WKS Abtasttheorem</h2>
+        <p>Diese Theorem besagt, dass ein Signal mit der Frequenz 0 - &fnof;<sub>max</sub> mindestens mit der Frequenz 2 * &fnof;<sub>max</sub> 
+            abgetastet werden muss, um aus den Werten der Analyse mittels Synthese wieder das Ursprungssignal zu erzeugen. 
+            Daraus ergeben sich die Restriktionen für das folgende Experiment:<br />
+            &fnof;<sub>nyquist</sub> = 0.5 * &fnof;<sub>abtast</sub><br />
+            &fnof;<sub>signal</sub> &lt; &fnof;<sub>nyquist</sub><br />
+            Bei einer Sample Rate (Anzahl der Signalabtastpunkte) von 8000 Samples/Sekunde ergibt das eine maximal Frequenz des Eingangssignals:<br />
+            &fnof;<sub>nyquist</sub> &gt; &fnof;<sub>max</sub> &lt; 4kHz
+        </p>
+        <h2>Eingangssignal</h2>
+        <p>Sinus mit der Frequenz <input id="frequency" value="60" />Hz. <a id="applyinput" href="">anwenden</a></p>
+        <p>Das Testsignal dauert 2 Sekunden und besteht dabei aus 8000 Sample / Sekunde. Macht also 16000 Sample insgesamt</p>
+        <p>Mit der Funktion sin(2&#960;&fnof; * t) generieren wir das Signal.</p>
+        <div>
+            <canvas id="inputsignal" width="800" height="200" style="border: 1px solid black;"></canvas>            
+            <p>die ersten 8000 samples (= 1s). <a id="playsignal" href="">Ton ausgeben</a></p>
+        </div>
+        <h2>DFT</h2>
+        <div>
+            <canvas id="dftfrequencydomain" width="800" height="200" style="border: 1px solid black;"></canvas>
+            <p id="dftfrequencydomaindata"></p>
+            <p>Frequenzanalyse mittels DFT <a id="calculatedftfrequencydomain" href="">Frequenzdomaine erzeugen</a></p>
+        </div>
+        
+        
+        <p>Quellen</p>
+        <ul>
+            <li>
+                <a href="http://cnx.org/content/m16334/latest/">The Cooley-Tukey Fast Fourier Transform Algorithm</a>
+            </li>
+            <li>
+                <a href="http://paulbourke.net/miscellaneous/dft/">Paul Bourke - FFT DFT</a>
+            </li>
+        </ul>
+        
+        <script>
+            var signal = [];
+            var samplePerSec = 8000;
+            var bitsPerSample = 8;
+            var duration = 2; // in s
+            
+            
+            var FastBase64 = {
+                chars: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
+                encLookup: [],
+
+                Init: function() {
+                    for (var i=0; i<4096; i++) {
+                        this.encLookup[i] = this.chars[i >> 6] + this.chars[i & 0x3F];
+                    }
+                },
+
+                Encode: function(src) {
+                    var len = src.length;
+                    var dst = '';
+                    var i = 0;
+                    while (len > 2) {
+                        n = (src[i] << 16) | (src[i+1]<<8) | src[i+2];
+                        dst+= this.encLookup[n >> 12] + this.encLookup[n & 0xFFF];
+                        len-= 3;
+                        i+= 3;
+                    }
+                    if (len > 0) {
+                        var n1= (src[i] & 0xFC) >> 2;
+                        var n2= (src[i] & 0x03) << 4;
+                        if (len > 1) n2 |= (src[++i] & 0xF0) >> 4;
+                        dst+= this.chars[n1];
+                        dst+= this.chars[n2];
+                        if (len == 2) {
+                            var n3= (src[i++] & 0x0F) << 2;
+                            n3 |= (src[i] & 0xC0) >> 6;
+                            dst+= this.chars[n3];
+                        }
+                        if (len == 1) dst+= '=';
+                        dst+= '=';
+                    }
+                    return dst;
+                } // end Encode
+            };     
+            
+            FastBase64.Init();                                
+            
+            function playSignal() {
+                var dataArray = new Array();
+                
+                function uIntToArray(val, length) {
+                    val = Math.round(val);
+                    var ret = [];
+                    for (var i = 0; i < length; i++) {
+                        ret.push(0xFF & val);
+                        val >>= 8;
+                    }
+                    
+                    return ret;
+                }
+                
+                function StringToArray(s) {
+                    var ret = [];
+                    for (var i = 0; i < s.length; i++) {
+                        ret.push(0xFF & s.charCodeAt(i));
+                    }
+                    
+                    
+                    return ret;
+                }
+                
+                function uInt8ArrayData() {
+                    var uInt8Array = [];
+                    var value = 0;
+                    for (var i = 0; i < signal.length; i++) {
+                        value = Math.round(127 + 127 * signal[i]);
+                        uInt8Array.push(0xFF & value);
+                    }
+                    
+                    return uInt8Array;
+                }
+                
+                // build wave header + data
+                dataArray = dataArray.concat(
+                    StringToArray("RIFF"),
+                    uIntToArray(36 + ((duration * samplePerSec * 1 * bitsPerSample) / 8), 4),
+                    StringToArray("WAVE"),
+                    StringToArray("fmt "),
+                    uIntToArray(16, 4),
+                    uIntToArray(1, 2),
+                    uIntToArray(1, 2),
+                    uIntToArray(samplePerSec, 4),
+                    uIntToArray((samplePerSec * bitsPerSample * 1) / 8, 4),
+                    uIntToArray((bitsPerSample * 1) / 8, 2),
+                    uIntToArray(bitsPerSample, 2),
+                    StringToArray("data"),
+                    uIntToArray((duration * samplePerSec * 1 * bitsPerSample) / 8, 4),
+                    uInt8ArrayData()
+                );
+  
+                var dataUri = 'data:audio/wav;base64,' + FastBase64.Encode(dataArray);
+                var audio = new Audio(dataUri);
+                audio.play();                
+            }
+            
+            function generateSineSignal(freq) {
+
+                var length = duration * samplePerSec;
+                // clear data
+                signal = [];                
+                for (var i = 0; i < length; i++) {
+                    signal.push(Math.sin(2 * Math.PI * freq * (i / samplePerSec)));
+                }                
+            }
+            
+            function drawSignalToCanvas()
+            {
+                var canvas = document.getElementById('inputsignal');
+                var ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                // just draw 1 sec
+                var yOffset = Math.round(canvas.height / 2);
+                var xOffset = 0;
+                
+                ctx.beginPath();
+                ctx.moveTo(xOffset, yOffset);
+                for (var i = 0; i < canvas.width; i++) {
+                    var index = Math.round(i * (samplePerSec / canvas.width));
+                    
+                    var fx = yOffset + (signal[index] * yOffset);
+                    ctx.lineTo(i, fx);
+                }
+                ctx.stroke();
+            }
+            
+            function calculateDFT()
+            {
+                var nyquistFreq = Math.round(samplePerSec / 2);
+                var frequency = [];
+                var maxMagnitude = 0;
+                var maxFrequency = 0;
+                
+                for (var i = 0; i < nyquistFreq; i++) {
+                    var sum1 = 0;
+                    var sum2 = 0;
+                    
+                    for (var k = 0; k < nyquistFreq; k++) {
+                        var coeff = ((2 * Math.PI) / samplePerSec) * (i * k);
+                        sum1 += signal[k] * Math.cos(coeff);
+                        sum2 += signal[k] * Math.sin(coeff);
+                    }
+
+                    // calc magnitude
+                    frequency[i] = Math.abs(
+                        Math.sqrt(
+                            Math.pow(sum1, 2) + Math.pow(sum2, 2)
+                        )
+                    );
+                        
+                    if (frequency[i] > maxMagnitude) {
+                        maxMagnitude = frequency[i];
+                        maxFrequency = i;
+                    }
+                }
+                
+                // normalize table
+                for (var i = 0; i < nyquistFreq; i++) {
+                    frequency[i] = frequency[i] / maxMagnitude;
+                }
+                
+                var canvas = document.getElementById('dftfrequencydomain');
+                var ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                for (var i = 0; i < nyquistFreq; i++) {
+                    var x = Math.round(i * (canvas.width / nyquistFreq));
+                    ctx.beginPath();
+                    ctx.moveTo(x, canvas.height);
+                    ctx.lineTo(x, canvas.height - Math.round(frequency[i] * canvas.height));
+                    ctx.stroke();
+                }
+                
+                var dataString = 'Samplerate: ' + samplePerSec + ' Hz<br />'
+                    + 'Nyquist Frequenz: ' + nyquistFreq + ' Hz<br />'
+                    + 'Frequenzpeak bei: ' + maxFrequency + ' Hz' + '<br />';
+                jQuery('#dftfrequencydomaindata').html(dataString);
+            }
+            
+            jQuery(document).ready(function() {
+                jQuery('#applyinput').click(function (event) {
+                    var freq = jQuery('input#frequency').val();
+                    generateSineSignal(freq);
+                    drawSignalToCanvas();                    
+                    event.preventDefault();
+                    return false;
+                }).trigger('click');
+                
+                jQuery('#playsignal').click(function (event) {
+                    event.preventDefault();
+                    playSignal();
+                    return false;
+                });
+                
+                jQuery('#calculatedftfrequencydomain').click(function (event){                   
+                    event.preventDefault();
+                    calculateDFT();
+                    return false;
+                });
+            });
+        </script>
+    </body>
+</html>
